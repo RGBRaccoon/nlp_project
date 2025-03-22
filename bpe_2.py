@@ -1,4 +1,5 @@
 import asyncio
+import json
 import re
 import time
 from typing import List
@@ -14,9 +15,11 @@ class Tokenizer:
         self.train_file_path = TRAIN_FILE_PATH
         self.infer_file_path = INFER_FILE_PATH
         self.output_file_path = OUTPUT_FILE_PATH
-
+        self.min_pair_freq = MIN_PAIR_FREQ
+        self.max_iteration = ASYNC_MAX_ITERATION
+        self.worker_num = 20
         self.vocab = self.get_vocab()
-        self.summary = ""
+        self.summary = {}
 
     def get_vocab(self) -> List[str]:
         with open(self.vocab_file_path, "r", encoding="utf-8") as f:
@@ -61,7 +64,7 @@ class Tokenizer:
 
     async def update_chunks(self, train_data: List[List[str]], best_pair: tuple, new_vocab: str) -> List[List[str]]:
         # 비동기 처리를 통해 속도의 향상
-        chunk_size = len(train_data) // 10
+        chunk_size = len(train_data) // self.worker_num
         divided_train_data = [train_data[i : i + chunk_size] for i in range(0, len(train_data), chunk_size)]
 
         async def process_chunk(chunk: List[List[str]]):
@@ -86,18 +89,16 @@ class Tokenizer:
 
         # 중간 병합 과정
         iteration = 0
-        min_pair_freq = MIN_PAIR_FREQ  # 최소 빈도수 임계값
-        max_iterations = ASYNC_MAX_ITERATION  # 최대 반복횟수
 
-        print("max_iterations : ", max_iterations)
+        print("max_iterations : ", self.max_iteration)
         while True:
-            pairs = self.get_pairs(train_data)
+            pairs = await self.get_pairs(train_data)
             if not pairs:
                 stop_reason = "pairs is empty"
                 break
 
             best_pair = max(pairs, key=pairs.get)
-            if pairs[best_pair] < min_pair_freq:  # 빈도수가 너무 낮으면 종료
+            if pairs[best_pair] < self.min_pair_freq:  # 빈도수가 너무 낮으면 종료
                 stop_reason = "stop by low frequency"
                 break
 
@@ -106,13 +107,13 @@ class Tokenizer:
 
             iteration += 1
             curr_time = time.time()
-            print(f"iteration : {iteration} / {max_iterations}, time : {curr_time - time_start}")
+            print(f"iteration : {iteration} / {self.max_iteration}, time : {curr_time - time_start}")
 
-            if iteration >= max_iterations:
+            if iteration >= self.max_iteration:
                 stop_reason = "stop by max iteration"
                 break
 
-        final_pairs = self.get_pairs(train_data)
+        final_pairs = await self.get_pairs(train_data)
 
         # 빈도수 기준으로 정렬하여 상위 max_vocab개 선택
         sorted_pairs = sorted(final_pairs.items(), key=lambda x: x[1], reverse=True)
@@ -123,16 +124,17 @@ class Tokenizer:
 
         self.summary = {
             "학습 총 시간": time_end - time_start,
-            "최대 반복 횟수": max_iterations,
+            "최대 반복 횟수": self.max_iteration,
             "실제 반복횟수": iteration,
             "stop_reason": stop_reason,
             "max vocab": self.max_vocab,
             "vocab 크기": len(vocab),
+            "min pair freq": self.min_pair_freq,
         }
-        print(self.summary)
         self.save_vocab(vocab)
 
     def tokenize(self):
+        self.vocab = self.get_vocab()
         # 입력받은 텍스트 데이터를 vocab를 기반으로 토큰화
         start_time = time.time()
         input_data = self.get_txt_data(self.infer_file_path)
@@ -141,6 +143,8 @@ class Tokenizer:
         # vocab 기반으로 토큰화
 
         result = []
+        success_count = 0
+        fail_count = 0
         for word in input_data:
             word_str = "".join(word)
             tokens = []
@@ -162,11 +166,13 @@ class Tokenizer:
                             tokens.append(substr)
                         start = end
                         found = True
+                        success_count += 1
                         break
                     end -= 1
 
                 # 매칭되는 것이 없으면 한 글자씩 처리
                 if not found:
+                    fail_count += 1
                     if start > 0:
                         tokens.append("##" + word_str[start])
                     else:
@@ -180,21 +186,94 @@ class Tokenizer:
 
         end_time = time.time()
         self.summary["토큰화 시간"] = end_time - start_time
+        self.summary["vocab"] = self.vocab_file_path
         self.summary["대상 파일 명"] = self.infer_file_path
-        print(self.summary)
+        self.summary["최대 반복 횟수"] = self.max_iteration
+        self.summary["최소 반복 횟수"] = self.min_pair_freq
+        self.summary["성공 횟수"] = success_count
+        self.summary["실패 횟수"] = fail_count
 
-    def get_pairs(self, text_list: List[List[str]]) -> dict:
-        # 연속된 문자 쌍의 빈도수를 계산
+        def save_summary():
+            try:
+                with open("total_output.json", "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except (FileNotFoundError, json.JSONDecodeError):
+                data = []
+
+            # 새로운 데이터 추가
+            data.append(self.summary)
+
+            # 전체 데이터 저장
+            with open("total_output.json", "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+
+        save_summary()
+
+    async def get_pairs(self, text_list: List[List[str]]) -> dict:
+
+        chunk_size = len(text_list) // self.worker_num
+        divided_text_list = [text_list[i : i + chunk_size] for i in range(0, len(text_list), chunk_size)]
+
+        async def process_chunk(chunk: List[List[str]]):
+            pairs = {}
+            for word in chunk:
+                for i in range(len(word) - 1):
+                    pair = tuple(word[i : i + 2])
+                    pairs[pair] = pairs.get(pair, 0) + 1
+            return pairs
+
+        async with asyncio.taskgroups.TaskGroup() as tg:
+            task_list = [tg.create_task(process_chunk(chunk)) for chunk in divided_text_list]
+        results = [chunk.result() for chunk in task_list]
+
         pairs = {}
-        for word in text_list:
-            for i in range(len(word) - 1):
-                # 리스트 대신 튜플 사용
-                pair = tuple(word[i : i + 2])  # 리스트를 튜플로 변환
-                pairs[pair] = pairs.get(pair, 0) + 1
+        for result in results:
+            for pair, count in result.items():
+                pairs[pair] = pairs.get(pair, 0) + count
+
+        # pairs = {}
+        # for word in text_list:
+        #     for i in range(len(word) - 1):
+        #         # 리스트 대신 튜플 사용
+        #         pair = tuple(word[i : i + 2])  # 리스트를 튜플로 변환
+        #         pairs[pair] = pairs.get(pair, 0) + 1
         return pairs
 
 
-tokenizer = Tokenizer()
-asyncio.run(tokenizer.update_vocab())
+async def run_tokenizer(max_iter: int, min_freq: int, vocab_path: str, output_path: str):
+    tokenizer = Tokenizer()  # 각 작업마다 새로운 객체 생성
+    tokenizer.max_iteration = max_iter
+    tokenizer.min_pair_freq = min_freq
+    tokenizer.vocab_file_path = vocab_path
+    tokenizer.output_file_path = output_path
+    await tokenizer.update_vocab()
+    tokenizer.tokenize()
 
-tokenizer.tokenize()
+
+async def main():
+    # chunk_size = 4
+
+    # for i in range(10):
+    #     for chunk_start in range(0, 4, chunk_size):
+    #         async with asyncio.taskgroups.TaskGroup() as tg:
+    #             for j in range(chunk_start, min(chunk_start + chunk_size, 4)):
+    #                 max_iter = 10000 + i * 1000
+    #                 min_freq = MIN_PAIR_FREQ - 10 * j
+    #                 vocab_path = f"vocab_{i}_{j}.txt"
+    #                 output_path = f"output_{i}_{j}.txt"
+
+    #                 tg.create_task(run_tokenizer(max_iter, min_freq, vocab_path, output_path))
+
+    for i in range(0, 2):
+        for j in range(0, 4):
+            tokenizer = Tokenizer()
+            tokenizer.max_iteration = 10000 + i * 1000
+            tokenizer.min_pair_freq = MIN_PAIR_FREQ - 10 * j
+            tokenizer.vocab_file_path = f"vocab_{i}_{j}.txt"
+            tokenizer.output_file_path = f"output_{i}_{j}.txt"
+            # await run_tokenizer(max_iter, min_freq, vocab_path, output_path)
+            tokenizer.tokenize()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
