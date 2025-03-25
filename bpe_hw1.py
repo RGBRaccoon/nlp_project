@@ -139,7 +139,7 @@ class Tokenizer:
 
         while len(vocab) < self.max_vocab:
             current_time = time.time()
-            print(f"iteration : {iteration}/{self.max_iteration}, time : {current_time - time_start}")
+            print(f"iteration : {iteration}/{self.max_vocab}, time : {current_time - time_start}")
             pairs = await self.get_pairs(train_data)
 
             if not pairs:
