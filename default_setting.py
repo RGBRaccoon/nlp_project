@@ -3,6 +3,5 @@ MAX_VOCAB = 30000
 ASYNC_MAX_ITERATION = 10000
 MIN_PAIR_FREQ = 40
 VOCAB_FILE_PATH = "vocab.txt"
-# INFER_FILE_PATH = "infer.txt"
 INFER_FILE_PATH = "input_1.txt"
 OUTPUT_FILE_PATH = "output.txt"

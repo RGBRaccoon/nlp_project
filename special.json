@@ -1,0 +1,28 @@
+[
+  {
+    "실제 반복횟수": 4189,
+    "stop_reason": "stop by low frequency",
+    "max vocab": 30000,
+    "vocab 크기": 28099,
+    "토큰화 시간": 208.1600592136383,
+    "vocab": "vocab_0_0_special_chars_false.txt",
+    "대상 파일 명": "input_1.txt",
+    "최대 반복 횟수": 10000,
+    "최소 등장 횟수": 40,
+    "성공 횟수": 51400,
+    "실패 횟수": 226471
+  },
+  {
+    "실제 반복횟수": 4906,
+    "stop_reason": "stop by low frequency",
+    "max vocab": 30000,
+    "vocab 크기": 30000,
+    "토큰화 시간": 429.41129875183105,
+    "vocab": "vocab_0_0_special_chars_false.txt",
+    "대상 파일 명": "input_1.txt",
+    "최대 반복 횟수": 10000,
+    "최소 등장 횟수": 40,
+    "성공 횟수": 55648,
+    "실패 횟수": 202503
+  }
+]

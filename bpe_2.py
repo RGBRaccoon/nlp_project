@@ -1,14 +1,17 @@
 import asyncio
-import functools
 import json
 import multiprocessing
 import re
 import time
-from concurrent.futures import ProcessPoolExecutor
-from functools import partial
 from typing import List
 
-from default_setting import *
+TRAIN_FILE_PATH = "pg100.txt"
+MAX_VOCAB = 30000
+ASYNC_MAX_ITERATION = 10000
+MIN_PAIR_FREQ = 40
+VOCAB_FILE_PATH = "vocab.txt"
+INFER_FILE_PATH = "input_1.txt"
+OUTPUT_FILE_PATH = "output.txt"
 
 
 class Tokenizer:
@@ -126,8 +129,6 @@ class Tokenizer:
 
     async def update_vocab(self, remove_special_chars: bool = True):
         time_start = time.time()
-
-        # 학습데이터를 기반으로 사전을 업데이트
         train_data = self.get_txt_data(self.train_file_path)
         train_data: List[List[str]] = self.preprocess(train_data, remove_special_chars=remove_special_chars)
         iteration = 0
@@ -141,9 +142,9 @@ class Tokenizer:
                 break
 
             best_pair = max(pairs, key=pairs.get)
-            if pairs[best_pair] < self.min_pair_freq:  # 빈도수가 너무 낮으면 종료
-                stop_reason = "stop by low frequency"
-                break
+            # if pairs[best_pair] < self.min_pair_freq:  # 빈도수가 너무 낮으면 종료
+            #     stop_reason = "stop by low frequency"
+            #     break
 
             new_vocab = "".join(best_pair)
             train_data = await self.update_chunks(train_data, best_pair, new_vocab)
@@ -154,7 +155,6 @@ class Tokenizer:
                 break
 
         # 빈도수 기준으로 정렬하여 상위 max_vocab개 선택
-
         sorted_pairs = sorted(pairs.items(), key=lambda x: x[1], reverse=True)
         vocab = ["".join(pair) for pair, _ in sorted_pairs[: self.max_vocab]]
 
@@ -261,40 +261,13 @@ if __name__ == "__main__":
     asyncio.run(tokenizer.update_vocab())
     tokenizer.tokenize()
 
-# async def run_tokenizer(max_iter: int, min_freq: int, vocab_path: str, output_path: str):
-#     tokenizer = Tokenizer()  # 각 작업마다 새로운 객체 생성
-#     tokenizer.max_iteration = max_iter
-#     tokenizer.min_pair_freq = min_freq
-#     tokenizer.vocab_file_path = vocab_path
-#     tokenizer.output_file_path = output_path
-#     await tokenizer.update_vocab()
-#     tokenizer.tokenize()
+
+async def main():
+    tokenizer = Tokenizer()
+
+    asyncio.run(tokenizer.update_vocab(remove_special_chars=False))
+    tokenizer.tokenize()
 
 
-# async def main():
-#     # chunk_size = 4
-
-#     # for i in range(10):
-#     #     for chunk_start in range(0, 4, chunk_size):
-#     #         async with asyncio.taskgroups.TaskGroup() as tg:
-#     #             for j in range(chunk_start, min(chunk_start + chunk_size, 4)):
-#     #                 max_iter = 10000 + i * 1000
-#     #                 min_freq = MIN_PAIR_FREQ - 10 * j
-#     #                 vocab_path = f"vocab_{i}_{j}.txt"
-#     #                 output_path = f"output_{i}_{j}.txt"
-
-#     #                 tg.create_task(run_tokenizer(max_iter, min_freq, vocab_path, output_path))
-
-#     for i in range(0, 2):
-#         for j in range(0, 4):
-#             tokenizer = Tokenizer()
-#             tokenizer.max_iteration = 10000 + i * 1000
-#             tokenizer.min_pair_freq = MIN_PAIR_FREQ - 10 * j
-#             tokenizer.vocab_file_path = f"vocab_{i}_{j}.txt"
-#             tokenizer.output_file_path = f"output_{i}_{j}.txt"
-#             # await run_tokenizer(max_iter, min_freq, vocab_path, output_path)
-#             tokenizer.tokenize()
-
-
-# if __name__ == "__main__":
-#     asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
