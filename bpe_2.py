@@ -225,6 +225,8 @@ class Tokenizer:
                 f.write(" ".join(tokens) + "\n")
 
         end_time = time.time()
+        self.summary["average token length"] = sum(len(tokens) for tokens in result) / len(result) if result else 0
+        self.summary["length_distribution"] = {i: result.count(i) for i in range(1, max(len(tokens) for tokens in result) + 1)}
         self.summary["토큰화 시간"] = end_time - start_time
         self.summary["vocab"] = self.vocab_file_path
         self.summary["대상 파일 명"] = self.infer_file_path
