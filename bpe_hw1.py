@@ -72,21 +72,25 @@ class Tokenizer:
         return new_text_list
 
     async def get_pairs(self, train_data: List[List[str]]) -> dict:
-        worker_num = 5
-        chunk_size = len(train_data) // worker_num
+        # worker_num을 더 늘리고 chunk_size 최적화
+        worker_num = min(20, len(train_data) // 1000)  # 데이터 크기에 따라 동적으로 조정
+        chunk_size = max(1000, len(train_data) // worker_num)
         divided_train_data = [train_data[i : i + chunk_size] for i in range(0, len(train_data), chunk_size)]
 
         async def process_chunk(chunk: List[List[str]]) -> dict:
             pairs = {}
             for word in chunk:
-                for i in range(len(word) - 1):
-                    pair = tuple(word[i : i + 2])
+                word_len = len(word)
+                for i in range(word_len - 1):
+                    pair = (word[i], word[i + 1])  # tuple() 함수 호출 제거
                     pairs[pair] = pairs.get(pair, 0) + 1
             return pairs
 
+        # 비동기 처리 최적화
         async with asyncio.TaskGroup() as tg:
             tasks = [tg.create_task(process_chunk(chunk)) for chunk in divided_train_data]
 
+        # 결과 병합 최적화
         all_pairs = {}
         for task in tasks:
             pairs = task.result()
@@ -96,23 +100,26 @@ class Tokenizer:
         return all_pairs
 
     async def update_chunks(self, train_data: List[List[str]], best_pair: tuple, new_vocab: str) -> List[List[str]]:
-        worker_num = 20
-        chunk_size = len(train_data) // worker_num
+        # worker_num 최적화
+        worker_num = min(40, len(train_data) // 1000)  # 데이터 크기에 따라 동적으로 조정
+        chunk_size = max(1000, len(train_data) // worker_num)
         divided_train_data = [train_data[i : i + chunk_size] for i in range(0, len(train_data), chunk_size)]
 
         async def process_chunk(chunk: List[List[str]]) -> List[List[str]]:
             updated_chunk = []
             for word in chunk:
+                word_len = len(word)
                 new_word = []
                 i = 0
-                while i < len(word) - 1:
-                    if tuple(word[i : i + 2]) == best_pair:
+                # 내부 루프 최적화
+                while i < word_len - 1:
+                    if word[i] == best_pair[0] and word[i + 1] == best_pair[1]:
                         new_word.append(new_vocab)
                         i += 2
                     else:
                         new_word.append(word[i])
                         i += 1
-                if i < len(word):
+                if i < word_len:
                     new_word.append(word[i])
                 updated_chunk.append(new_word)
             return updated_chunk
@@ -120,6 +127,7 @@ class Tokenizer:
         async with asyncio.TaskGroup() as tg:
             tasks = [tg.create_task(process_chunk(chunk)) for chunk in divided_train_data]
 
+        # 결과 병합 최적화
         updated_data = []
         for task in tasks:
             chunk = task.result()
@@ -136,6 +144,7 @@ class Tokenizer:
 
         default_vocab = set(char for word in train_data for char in word)
         vocab = list(default_vocab)
+        stop_reason = "vocab max"
 
         while len(vocab) < self.max_vocab:
             current_time = time.time()
@@ -156,19 +165,15 @@ class Tokenizer:
             vocab.append(new_vocab)
 
             iteration += 1
-            if iteration >= self.max_iteration:
-                stop_reason = "stop by max iteration"
-                break
-
-        # 빈도수 기준으로 정렬하여 상위 max_vocab개 선택
-        # sorted_pairs = sorted(pairs.items(), key=lambda x: x[1], reverse=True)
-        # vocab = ["".join(pair) for pair, _ in sorted_pairs[: self.max_vocab]]
+            # if iteration >= self.max_iteration:
+            #     stop_reason = "stop by max iteration"
+            #     break
 
         time_end = time.time()
 
         self.summary = {
             "실제 반복횟수": iteration,
-            "stop_reason": "stop_reason",
+            "stop_reason": stop_reason,
             "max vocab": self.max_vocab,
             "vocab 크기": len(vocab),
         }
@@ -245,7 +250,6 @@ class Tokenizer:
         avg_token_length = total_token_length / token_count if token_count > 0 else 0
         end_time = time.time()
         self.summary["average token length"] = avg_token_length
-        self.summary["length_distribution"] = {i: result.count(i) for i in range(1, max(len(tokens) for tokens in result) + 1)}
         self.summary["토큰화 시간"] = end_time - start_time
         self.summary["vocab"] = self.vocab_file_path
         self.summary["대상 파일 명"] = self.infer_file_path
