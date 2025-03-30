@@ -1,6 +1,5 @@
 import asyncio
 import json
-import multiprocessing
 import re
 import time
 from typing import List
@@ -156,18 +155,50 @@ class Tokenizer:
                 break
 
             best_pair = max(pairs, key=pairs.get)
-            # if pairs[best_pair] < self.min_pair_freq:  # 빈도수가 너무 낮으면 종료
-            #     stop_reason = "stop by low frequency"
-            #     break
-
+            iteration += 1
             new_vocab = "".join(best_pair)
             train_data = await self.update_chunks(train_data, best_pair, new_vocab)
             vocab.append(new_vocab)
 
+        time_end = time.time()
+
+        self.summary = {
+            "실제 반복횟수": iteration,
+            "stop_reason": stop_reason,
+            "max vocab": self.max_vocab,
+            "vocab 크기": len(vocab),
+        }
+        self.save_vocab(vocab)
+
+    async def update_vocab_v2(self, remove_special_chars: bool = True):
+        time_start = time.time()
+        train_data = self.get_txt_data(self.train_file_path)
+        train_data: List[List[str]] = self.preprocess(train_data, remove_special_chars=remove_special_chars)
+        iteration = 0
+
+        while True:
+            current_time = time.time()
+            print(f"iteration : {iteration}/{self.max_iteration}, time : {current_time - time_start}")
+            pairs = await self.get_pairs(train_data)
+            if not pairs:
+                stop_reason = "pairs is empty"
+                break
+
+            best_pair = max(pairs, key=pairs.get)
+            if pairs[best_pair] < self.min_pair_freq:  # 빈도수가 너무 낮으면 종료
+                stop_reason = "stop by low frequency"
+                break
+
+            new_vocab = "".join(best_pair)
+            train_data = await self.update_chunks(train_data, best_pair, new_vocab)
+
             iteration += 1
-            # if iteration >= self.max_iteration:
-            #     stop_reason = "stop by max iteration"
-            #     break
+            if iteration >= self.max_iteration:
+                stop_reason = "stop by max iteration"
+                break
+
+        sorted_pairs = sorted(pairs.items(), key=lambda x: x[1], reverse=True)
+        vocab = ["".join(pair) for pair, _ in sorted_pairs[: self.max_vocab]]
 
         time_end = time.time()
 
@@ -185,8 +216,6 @@ class Tokenizer:
         start_time = time.time()
         input_data = self.get_txt_data(self.infer_file_path)
         input_data: List[str] = self.preprocess(input_data, remove_special_chars=False)
-
-        # vocab 기반으로 토큰화
 
         result = []
         success_count = 0
@@ -273,17 +302,3 @@ class Tokenizer:
                 json.dump(data, f, ensure_ascii=False, indent=2)
 
         save_summary()
-
-
-if __name__ == "__main__":
-
-    tokenizer = Tokenizer()
-    for i in range(10000, 20001, 10000):
-        tokenizer.max_vocab = i
-        tokenizer.vocab_file_path = f"vocab_hw1_no_min_freq_vocab_size_{i}.txt"
-        tokenizer.output_file_path = f"output_hw1_no_min_freq_vocab_size_{i}.txt"
-        asyncio.run(tokenizer.update_vocab())
-        tokenizer.tokenize()
-
-    asyncio.run(tokenizer.update_vocab())
-    tokenizer.tokenize()
